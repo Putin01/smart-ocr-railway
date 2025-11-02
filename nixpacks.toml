@@ -1,0 +1,14 @@
+﻿[phases.setup]
+cmds = [
+    "apt-get update",
+    "apt-get install -y tesseract-ocr tesseract-ocr-vie"
+]
+
+[phases.install]
+cmds = [
+    "pip install --upgrade pip",
+    "pip install -r requirements.txt"
+]
+
+[start]
+cmd = "python main.py"
