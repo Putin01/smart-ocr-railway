@@ -1,0 +1,177 @@
+﻿# cross_drive_ocr.py - OCR hoạt động trên cả ổ C: và D:
+import os
+import sys
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class CrossDriveOCR:
+    def __init__(self):
+        # Thiết lập environment variables cho ổ D:
+        os.environ["HF_HOME"] = "D:\\.cache\\huggingface"
+        
+        self.text_processor = None
+        self.reader = None
+        self._initialize_components()
+    
+    def _initialize_components(self):
+        """Khởi tạo tất cả components với cache trên ổ D:"""
+        try:
+            logger.info("🔄 Đang khởi tạo OCR engine (cache trên ổ D:)...")
+            
+            # Khởi tạo EasyOCR
+            import easyocr
+            self.reader = easyocr.Reader(['vi', 'en'], gpu=False)
+            logger.info("✅ EasyOCR đã sẵn sàng")
+            
+            # Khởi tạo Vietnamese processor
+            self._init_vietnamese_processor()
+            logger.info("✅ Vietnamese processor đã sẵn sàng")
+            
+            logger.info("🎉 OCR engine đã khởi tạo thành công trên ổ D:")
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi khởi tạo: {e}")
+            raise
+    
+    def _init_vietnamese_processor(self):
+        """Khởi tạo Vietnamese text processor"""
+        import re
+        import unicodedata
+        
+        class VietnameseTextProcessor:
+            def __init__(self):
+                self.encoding_fixes = {
+                    'Ã¡': 'á', 'Ã ': 'à', 'Ã¢': 'â', 'Ã£': 'ã',
+                    'Ã¨': 'è', 'Ã©': 'é', 'Ãª': 'ê', 'Ã¬': 'ì',
+                    'Ã­': 'í', 'Ã²': 'ò', 'Ã³': 'ó', 'Ã´': 'ô',
+                    'Ãµ': 'õ', 'Ã¹': 'ù', 'Ãº': 'ú', 'Ã½': 'ý',
+                    'Äƒ': 'ă', 'Ä‘': 'đ', 'Ä©': 'ĩ', 'Å©': 'ũ',
+                    'Æ¡': 'ơ', 'Æ°': 'ư'
+                }
+            
+            def normalize_vietnamese(self, text):
+                if not text:
+                    return text
+                
+                for wrong, correct in self.encoding_fixes.items():
+                    text = text.replace(wrong, correct)
+                
+                text = unicodedata.normalize('NFC', text)
+                text = re.sub(r'\s+', ' ', text).strip()
+                
+                return text
+        
+        self.text_processor = VietnameseTextProcessor()
+    
+    def extract_text(self, image_path):
+        """Trích xuất text từ ảnh - hỗ trợ cả ổ C: và D:"""
+        try:
+            # Xử lý đường dẫn ảnh
+            actual_path = self._resolve_image_path(image_path)
+            if not actual_path:
+                return {
+                    'success': False,
+                    'error': f'Không tìm thấy file: {image_path}',
+                    'text': '',
+                    'confidence': 0.0,
+                    'character_count': 0
+                }
+            
+            logger.info(f"📖 Đang xử lý ảnh: {os.path.basename(actual_path)}")
+            
+            # OCR processing
+            result = self.reader.readtext(actual_path)
+            
+            # Extract text
+            all_text = []
+            confidence_scores = []
+            
+            for detection in result:
+                text = detection[1]
+                confidence = detection[2]
+                all_text.append(text)
+                confidence_scores.append(confidence)
+            
+            combined_text = '\n'.join(all_text)
+            
+            # Xử lý tiếng Việt
+            cleaned_text = self.text_processor.normalize_vietnamese(combined_text)
+            
+            # Tính độ tin cậy
+            avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
+            
+            logger.info(f"✅ OCR thành công: {len(cleaned_text)} ký tự, độ tin cậy: {avg_confidence:.2%}")
+            
+            return {
+                'success': True,
+                'text': cleaned_text,
+                'confidence': avg_confidence,
+                'character_count': len(cleaned_text),
+                'raw_lines': len(all_text)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi OCR: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'text': '',
+                'confidence': 0.0,
+                'character_count': 0
+            }
+    
+    def _resolve_image_path(self, image_path):
+        """Giải quyết đường dẫn ảnh trên cả ổ C: và D:"""
+        if os.path.exists(image_path):
+            return image_path
+        
+        # Thử chuyển đổi giữa các ổ đĩa
+        drives = ['C:', 'D:']
+        current_drive = image_path[0:2]
+        
+        for drive in drives:
+            if drive != current_drive:
+                alt_path = drive + image_path[2:]
+                if os.path.exists(alt_path):
+                    return alt_path
+        
+        return None
+
+# Global instance
+_ocr_instance = None
+
+def get_ocr_engine():
+    """Lấy OCR engine instance"""
+    global _ocr_instance
+    if _ocr_instance is None:
+        _ocr_instance = CrossDriveOCR()
+    return _ocr_instance
+
+def extract_text_from_image(image_path):
+    """API chính cho hệ thống"""
+    ocr = get_ocr_engine()
+    return ocr.extract_text(image_path)
+
+# Demo
+if __name__ == '__main__':
+    print("🧪 TEST OCR ĐA Ổ ĐĨA")
+    print("=" * 50)
+    
+    # Test với ảnh trên ổ C:
+    test_images = [
+        r'C:\Users\ADMIN\smart-ocr-system\Smart-OCR-System-Complete-v1.0\uploads\66e5febd.png'
+    ]
+    
+    for image_path in test_images:
+        print(f"\n📁 Đang xử lý: {image_path}")
+        result = extract_text_from_image(image_path)
+        
+        if result['success']:
+            print(f"   ✅ Thành công: {result['confidence']:.2%} độ tin cậy")
+            print(f"   📝 {result['text'][:80]}...")
+        else:
+            print(f"   ❌ Thất bại: {result['error']}")
+    
+    print("\n🎉 KẾT THÚC TEST OCR ĐA Ổ ĐĨA")
